@@ -218,6 +218,6 @@ namespace ThoughtWorks.CruiseControl.WebDashboard.Dashboard
                 cont++;
             }
             return -1;
-        }
+        } 
     }
 }
