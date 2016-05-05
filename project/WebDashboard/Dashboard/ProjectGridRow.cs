@@ -135,7 +135,7 @@ namespace ThoughtWorks.CruiseControl.WebDashboard.Dashboard
                 }
             }
         }
-
+        
         private string CalculateHtmlColor(IntegrationStatus integrationStatus)
         {
             if (integrationStatus == IntegrationStatus.Success)
