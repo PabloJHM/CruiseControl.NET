@@ -15,6 +15,7 @@ using ThoughtWorks.CruiseControl.Core.Queues;
 using ThoughtWorks.CruiseControl.Core.Config;
 using ThoughtWorks.CruiseControl.Core;
 using ThoughtWorks.CruiseControl.WebDashboard.IO;
+using ThoughtWorks.CruiseControl.Remote.Parameters;
 
 namespace ThoughtWorks.CruiseControl.WebDashboard.Dashboard
 {
@@ -26,7 +27,6 @@ namespace ThoughtWorks.CruiseControl.WebDashboard.Dashboard
             var farmService = parameters.FarmService;
             string disk = new AppSettingsReader().GetValue("disk", typeof(System.String)).ToString();
             string server = new AppSettingsReader().GetValue("framework", typeof(System.String)).ToString();
-           
 
             foreach (ProjectStatusOnServer statusOnServer in parameters.StatusList)
             {
@@ -43,8 +43,8 @@ namespace ThoughtWorks.CruiseControl.WebDashboard.Dashboard
 
                 if (Directory.Exists(dir))
                 {
-                    var file = String.Format(dir + @"{0}\ccnet\{1}\TestResults.html", serverSpecifier.ServerName, projectSpecifier.ProjectName);
-                    var fileRunningTime = String.Format(dir + @"{0}\ccnet\{1}\RunningTime.html", serverSpecifier.ServerName, projectSpecifier.ProjectName);
+                    var file = String.Format( @"{0}{1}\ccnet\{2}\TestResults.html", dir, serverSpecifier.ServerName, projectSpecifier.ProjectName);
+                    var fileRunningTime = String.Format( @"{0}{1}\ccnet\{2}\RunningTime.html", dir, serverSpecifier.ServerName, projectSpecifier.ProjectName);
                     try
                     {
                         if(File.Exists(file))
@@ -65,7 +65,9 @@ namespace ThoughtWorks.CruiseControl.WebDashboard.Dashboard
 
                 List<DataGridRow> lastFiveDataGridRows = getLastFiveDataGridRows(serverSpecifier, projectSpecifier, dir, farmService, status);
                 int queuePosition = getQueuePosition(status, serverSpecifier, projectSpecifier, farmService);
-                ProjectGridRow test = new ProjectGridRow(status,
+                List<ParameterBase> buildParameters = status.Parameters;
+                int brokenDays = brokenTime(serverSpecifier, projectSpecifier, dir, farmService, status);
+                ProjectGridRow projectGridRow = new ProjectGridRow(status,
                                        serverSpecifier,
                                        parameters.UrlBuilder.BuildProjectUrl(ProjectReportProjectPlugin.ACTION_NAME, projectSpecifier),
                                        parameters.UrlBuilder.BuildProjectUrl(ProjectParametersAction.ActionName, projectSpecifier),
@@ -73,8 +75,10 @@ namespace ThoughtWorks.CruiseControl.WebDashboard.Dashboard
                                        runningTime,
                                        lastFiveDataGridRows,
                                        queuePosition,
+                                       buildParameters,
+                                       brokenDays,
                                        parameters.Translation);
-                rows.Add(test);
+                rows.Add(projectGridRow);
             }
 
             rows.Sort(GetComparer(parameters.SortColumn, parameters.SortIsAscending));
@@ -130,7 +134,7 @@ namespace ThoughtWorks.CruiseControl.WebDashboard.Dashboard
         private string readRunningTimeIfFileEmpty(IFarmService farmService, DefaultProjectSpecifier projectSpecifier, IServerSpecifier serverSpecifier, string dir)
         {
             IBuildSpecifier[] mostRecentBuildSpecifiers = farmService.GetMostRecentBuildSpecifiers(projectSpecifier, 1, BuildReportBuildPlugin.ACTION_NAME);
-            var buildFile = String.Format(dir + @"{0}\ccnet\{1}\Artifacts\buildlogs\{2}", serverSpecifier.ServerName, projectSpecifier.ProjectName, mostRecentBuildSpecifiers[0].BuildName);
+            var buildFile = String.Format(@"{0}{1}\ccnet\{2}\Artifacts\buildlogs\{3}", dir, serverSpecifier.ServerName, projectSpecifier.ProjectName, mostRecentBuildSpecifiers[0].BuildName);
             var doc = XDocument.Load(buildFile);
             IEnumerable<XElement> elemList = doc.Descendants("build");
             if (Directory.Exists(buildFile))
@@ -143,11 +147,12 @@ namespace ThoughtWorks.CruiseControl.WebDashboard.Dashboard
             return String.Empty;
         }
 
-        private List<DataGridRow> getLastFiveDataGridRows(IServerSpecifier serverSpecifier, DefaultProjectSpecifier projectSpecifier, string dir, IFarmService farmService, ProjectStatus status)
+        private List<DataGridRow> getLastFiveDataGridRows(IServerSpecifier serverSpecifier, DefaultProjectSpecifier projectSpecifier, string dir, 
+            IFarmService farmService, ProjectStatus status)
         {
             var lastFiveDataList = new List<DataGridRow>();
             int cont = 0;
-            if (Directory.Exists(String.Format(dir + @"{0}\ccnet\{1}\Artifacts\buildlogs", serverSpecifier.ServerName, projectSpecifier.ProjectName)))
+            if (Directory.Exists(String.Format(@"{0}{1}\ccnet\{2}\Artifacts\buildlogs", dir, serverSpecifier.ServerName, projectSpecifier.ProjectName)))
             {
                 IBuildSpecifier[] mostRecentBuildSpecifiers = farmService.GetMostRecentBuildSpecifiers(projectSpecifier, 5, BuildReportBuildPlugin.ACTION_NAME);
                 if (Directory.Exists(dir))
@@ -160,7 +165,8 @@ namespace ThoughtWorks.CruiseControl.WebDashboard.Dashboard
                 }
                 return lastFiveDataList;
             }
-            return null;
+            lastFiveDataList.Add(new DataGridRow("Unknown", string.Empty, string.Empty));
+            return lastFiveDataList;
         }
 
         private DataGridRow getBuildData(IServerSpecifier serverSpecifier, DefaultProjectSpecifier projectSpecifier, string dir, ProjectStatus status, IBuildSpecifier buildSpecifier, int cont)
@@ -168,24 +174,20 @@ namespace ThoughtWorks.CruiseControl.WebDashboard.Dashboard
             DataGridRow dataToReturn;
             string buildName = buildSpecifier.BuildName;
             string lastStatus = "";
-            string localserver = new AppSettingsReader().GetValue("servername", typeof(System.String)).ToString();
             if (cont == 0)
             {
                 lastStatus = status.BuildStatus.ToString();
             }
             else
             {
-                if (buildName.Contains("Lbuild"))
-                { lastStatus = "Success"; }
-                else
-                { lastStatus = "Failure"; }
+                if (buildName.Contains("Lbuild")) { lastStatus = "Success"; }
+                else { lastStatus = "Failure"; }
             }
             string lastDate = String.Format("{0}-{1}-{2} {3}:{4}:{5}", buildName.Substring(3, 4), buildName.Substring(7, 2), buildName.Substring(9, 2),
                                                                         buildName.Substring(11, 2), buildName.Substring(13, 2), buildName.Substring(15, 2));
             string lastLink = String.Format("http://{0}/ccnet/server/{0}/project/{1}/build/{2}/ViewBuildReport.aspx", 
                                                     serverSpecifier.ServerName, projectSpecifier.ProjectName, buildName);
-            DataGridRow aux = new DataGridRow(lastStatus, lastDate, lastLink);
-            dataToReturn = aux;
+            dataToReturn = new DataGridRow(lastStatus, lastDate, lastLink);
             return dataToReturn;
         }
 
@@ -224,6 +226,33 @@ namespace ThoughtWorks.CruiseControl.WebDashboard.Dashboard
                 }
             }
             return -1;
+        }
+
+        private int brokenTime(IServerSpecifier serverSpecifier, DefaultProjectSpecifier projectSpecifier, string dir, IFarmService farmService, ProjectStatus status)
+        {
+            DataGridRow helper;
+            DateTime dateFailure = DateTime.Now;
+            DateTime today = DateTime.Now;
+            int cont = 0;
+            string dirPath = String.Format(@"{0}{1}\ccnet\{2}\Artifacts\buildlogs", dir, serverSpecifier.ServerName, projectSpecifier.ProjectName);
+            if (Directory.Exists(dirPath))
+            {
+                IBuildSpecifier[] mostRecentBuildSpecifiers = farmService.GetMostRecentBuildSpecifiers(projectSpecifier, Directory.GetFiles(dirPath).Length, BuildReportBuildPlugin.ACTION_NAME);
+                foreach (IBuildSpecifier buildSpecifier in mostRecentBuildSpecifiers)
+                {
+                    helper = getBuildData(serverSpecifier, projectSpecifier, dir, status, buildSpecifier, cont);
+                    if (helper.BuildStatus.Equals("Failure"))
+                    {
+                        dateFailure = DateTime.ParseExact(helper.Date, "yyyy-MM-dd HH:mm:ss", System.Globalization.CultureInfo.InvariantCulture);
+                    }
+                    else if (helper.BuildStatus.Equals("Success"))
+                    {
+                        break;
+                    }
+                    cont = 1;
+                }
+            }
+            return Convert.ToInt32((today - dateFailure).TotalDays);
         }
     }
 }
