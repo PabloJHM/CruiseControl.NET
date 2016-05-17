@@ -402,17 +402,20 @@ input.stop--task:hover {
 .cancelPendingIcon{
 	padding-left: 5px;
 	padding-bottom:4px;
+	width:20px;
 }
 
 .playSmallIcon{
 	margin-left:4px;
-	padding-left:2px;
-	margin-right:4px;
-	margin-bottom:4px;
+	padding-left:10px;
+	margin-right:10px;
+	margin-bottom:6px;
+	width:16px;
 }
 
 .action--iconSmall{
 	padding: 5px 10px;
+	width:20px;
 }
 
 /* Projects grid */
@@ -447,8 +450,8 @@ input.stop--task:hover {
 {
 	border-top: solid 1px #ccc;
 	border-bottom: solid 1px #ccc;
-	padding:1px 0;
 	text-align:center;
+	margin-left:-15px;
 }
 
 .SortableGrid th
@@ -516,6 +519,36 @@ input.stop--task:hover {
 	list-style-type: none;
 	font-weight:bold;
 	color:#F88017;
+	text-align:center;
+}
+
+.content--force__fail__WithBreakers
+{
+	padding-top:12px;
+	list-style-type: none;
+	font-weight:bold;
+	color:#F88017;
+	text-align:center;
+}
+
+.brokenDays
+{
+	font-style:bold;
+	color:#FF0000;
+	margin-left:-1px;
+	margin-top:-21px;
+	border: 2px solid red;
+	border-radius:30px;
+	padding:3px 0;
+	padding-left: 25px;
+	width:80px;
+}
+
+.statusIconTd
+{
+	text-align: left;
+	margin-right: -30px;
+	padding-left: 5px;
 }
 
 .SortableGrid .left.scroll--content ul li.content--task__fail
@@ -626,9 +659,11 @@ input.stop--task:hover {
 .volunteerFixForm{
 	width:100%;
 	border:0;
-	padding:5px 10px;
-	background-color:red;
+	padding:5px 25px;
+	padding-right: 25px;
+	background-color:#FF0000;
 	display:inline;
+	text-align:center;
 }
 
 .volunteerFix{
@@ -649,9 +684,37 @@ input.stop--task:hover {
 	border:0;
 	width:45%;
 	padding: 3px 5px;
-	margin-right: 29px;
 	font-weight: bold;
 	display:inline;
+}
+
+.iconFixer{
+	margin-bottom: -6px;
+	padding: 3px 10px;
+}
+
+.removeFixerForm{
+	margin-top: 5px;
+	margin-bottom: -5px;
+	text-align:center;
+}
+
+.removeFixerFormNoBreakers{
+	text-align:center;
+}
+
+.removeFixerFormNoBreakers li{
+	display:inline;
+}
+.removeFixerForm li{
+	display:inline;
+}
+
+.iconRemoveFixer{
+	display: inline;
+	width: 10px;
+	padding: 3px 7px;
+	margin-bottom: -4px;
 }
 
 .hiddenSubmit{
@@ -736,7 +799,7 @@ tr.buildStatus td
 
 /* ICONS */
 .icon0{
-	height:22px;
+	height:19px;
 }
 
 .icon1{
@@ -753,6 +816,12 @@ tr.buildStatus td
 
 .icon4{
 	height:14px;
+}
+
+.buttonIcon{
+	padding: 5px 10px;
+	background: url("http://${projectGridRow.ServerName}/ccnet/images/forceSmall.png");
+	border: 0;
 }
 
 .ico  {
@@ -793,9 +862,3 @@ tr.buildStatus td
 	transform:scale(1.3);
 	background-image: url(images/UNIT4info.png);
 }
-
-
-
-
-
-
