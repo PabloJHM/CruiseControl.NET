@@ -1,258 +1,562 @@
 using System;
-using System.Configuration;
 using System.Collections.Generic;
 using System.IO;
+using System.Reflection;
 using System.Xml;
-using System.Xml.Linq;
-using System.Linq;
-using ThoughtWorks.CruiseControl.Core.Reporting.Dashboard.Navigation;
-using ThoughtWorks.CruiseControl.Remote;
-using ThoughtWorks.CruiseControl.WebDashboard.Plugins.ProjectReport;
-using ThoughtWorks.CruiseControl.WebDashboard.Resources;
-using ThoughtWorks.CruiseControl.WebDashboard.ServerConnection;
-using ThoughtWorks.CruiseControl.WebDashboard.Plugins.BuildReport;
-using ThoughtWorks.CruiseControl.Core.Queues;
-using ThoughtWorks.CruiseControl.Core.Config;
+using System.Xml.Serialization;
 using ThoughtWorks.CruiseControl.Core;
-using ThoughtWorks.CruiseControl.WebDashboard.IO;
+using ThoughtWorks.CruiseControl.Remote;
+using ThoughtWorks.CruiseControl.Remote.Mono;
 using ThoughtWorks.CruiseControl.Remote.Parameters;
 
-namespace ThoughtWorks.CruiseControl.WebDashboard.Dashboard
+namespace ThoughtWorks.CruiseControl.CCCmd
 {
-    public class ProjectGrid : IProjectGrid
+    class Program
     {
-        public ProjectGridRow[] GenerateProjectGridRows(ProjectGridParameters parameters)
+        private static bool help;
+        private static string server;
+        private static string target;
+        private static string project;
+        private static bool all;
+        private static bool quiet;
+        private static string string_params;
+        private static string params_filename;
+        private static CommandType command;
+        private static List<string> extra = new List<string>();
+        private static string userName;
+        private static string password;
+        private static bool xml;
+        private static string volunteer_name = Environment.UserName;
+        private static BuildCondition condition = BuildCondition.ForceBuild;
+
+        static void Main(string[] args)
         {
-            var rows = new List<ProjectGridRow>();
-            var farmService = parameters.FarmService;
-            string disk = new AppSettingsReader().GetValue("disk", typeof(System.String)).ToString();
-            string server = new AppSettingsReader().GetValue("framework", typeof(System.String)).ToString();
-
-            foreach (ProjectStatusOnServer statusOnServer in parameters.StatusList)
+            OptionSet opts = new OptionSet();
+            opts.Add("h|?|help", "display this help screen", delegate(string v) { help = v != null; })
+                .Add("s|server=", "the CruiseControl.Net server to send the commands to (required for all actions except help)", delegate(string v) { server = v; })
+                .Add("t|target=", "the target server for all messages", delegate(string v) { target = v; })
+                .Add("p|project=", "the project to use (required for all actions except help and retrieve)", delegate(string v) { project = v; })
+                .Add("a|all", "lists all the projects (only valid for retrieve)", delegate(string v) { all = v != null; })
+                .Add("q|quiet", "run in quiet mode (do not print messages)", delegate(string v) { quiet = v != null; })
+                .Add("ime|ifmodificationexists", "only force the build if modification exist", delegate(string v) { condition = v != null ? BuildCondition.IfModificationExists : BuildCondition.ForceBuild; })
+                .Add("r|params=", "a semicolon separated list of name value pairs", delegate(string v) { string_params = v; })
+                .Add("f|params_file=", "the name of a XML file containing the parameters values to use when forcing a build. If specified at the same time as this flag, the values from the command line are ignored", delegate(string v) { params_filename = v; })
+                .Add("x|xml", "outputs the details in XML format instead of plain text (only valid for retrieve)", delegate(string v) { xml = v != null; })
+                .Add("user=", "the user of the user account to use", v => { userName = v; })
+                .Add("pwd=", "the password to use for the user", v => { password = v; })
+                .Add("volunteer_name=", "the name to use when volunteering (defaults to Environment.UserName)", v => { volunteer_name = v; });
+            try
             {
-                ProjectStatus status = statusOnServer.ProjectStatus;
-                IServerSpecifier serverSpecifier = statusOnServer.ServerSpecifier;
-                DefaultProjectSpecifier projectSpecifier = new DefaultProjectSpecifier(serverSpecifier, status.Name);
-
-                if ((parameters.CategoryFilter != string.Empty) && (parameters.CategoryFilter != status.Category))
-                    continue;
-
-                string dir = disk + server + @"\";
-                string statistics = "<!-- UNABLE TO FIND HEARTBEAT FOLDER -->";
-                string runningTime = String.Empty;
-
-                if (Directory.Exists(dir))
-                {
-                    var file = String.Format( @"{0}{1}\ccnet\{2}\TestResults.html", dir, serverSpecifier.ServerName, projectSpecifier.ProjectName);
-                    var fileRunningTime = String.Format( @"{0}{1}\ccnet\{2}\RunningTime.html", dir, serverSpecifier.ServerName, projectSpecifier.ProjectName);
-                    try
-                    {
-                        if(File.Exists(file))
-                            statistics = File.ReadAllText(file);
-
-                        if (File.Exists(fileRunningTime))
-                            runningTime = File.ReadAllText(fileRunningTime);
-
-                        if (!File.Exists(fileRunningTime) || runningTime.Length < 1)
-                            runningTime = readRunningTimeIfFileEmpty(farmService, projectSpecifier, serverSpecifier, dir); 
-                    }
-                    catch (Exception e)
-                    {
-                        statistics = String.Format("<!-- UNABLE TO GET STATISTICS: {0} -->", e.Message.Replace("-->", "- - >"));
-                        runningTime = String.Format("<!-- UNABLE TO GET RUNNING TIME: {0} -->", e.Message.Replace("-->", "- - >"));
-                    }
-                }
-
-                List<DataGridRow> lastFiveDataGridRows = getLastFiveDataGridRows(serverSpecifier, projectSpecifier, dir, farmService, status);
-                int queuePosition = getQueuePosition(status, serverSpecifier, projectSpecifier, farmService);
-                List<ParameterBase> buildParameters = status.Parameters;
-                int brokenDays = brokenTime(serverSpecifier, projectSpecifier, dir, farmService, status);
-                ProjectGridRow projectGridRow = new ProjectGridRow(status,
-                                       serverSpecifier,
-                                       parameters.UrlBuilder.BuildProjectUrl(ProjectReportProjectPlugin.ACTION_NAME, projectSpecifier),
-                                       parameters.UrlBuilder.BuildProjectUrl(ProjectParametersAction.ActionName, projectSpecifier),
-                                       statistics,
-                                       runningTime,
-                                       lastFiveDataGridRows,
-                                       queuePosition,
-                                       buildParameters,
-                                       brokenDays,
-                                       parameters.Translation);
-                rows.Add(projectGridRow);
+                extra = opts.Parse(args);
+            }
+            catch (OptionException e)
+            {
+                Console.WriteLine(e.Message);
+                Console.WriteLine(e.StackTrace);
+                return;
             }
 
-            rows.Sort(GetComparer(parameters.SortColumn, parameters.SortIsAscending));
-            return rows.ToArray();
-        }
-
-        private IComparer<ProjectGridRow> GetComparer(ProjectGridSortColumn column, bool ascending)
-        {
-            return new ProjectGridRowComparer(column, ascending);
-        }
-
-        private class ProjectGridRowComparer
-            : IComparer<ProjectGridRow>
-        {
-            private readonly ProjectGridSortColumn column;
-            private readonly bool ascending;
-
-            public ProjectGridRowComparer(ProjectGridSortColumn column, bool ascending)
+            if ((extra.Count == 1) && !help)
             {
-                this.column = column;
-                this.ascending = ascending;
-            }
-
-            public int Compare(ProjectGridRow x, ProjectGridRow y)
-            {
-                if (column == ProjectGridSortColumn.Name)
-                {
-                    return x.Name.CompareTo(y.Name) * (ascending ? 1 : -1);
-                }
-                else if (column == ProjectGridSortColumn.LastBuildDate)
-                {
-                    return x.LastBuildDate.CompareTo(y.LastBuildDate) * (ascending ? 1 : -1);
-                }
-                else if (column == ProjectGridSortColumn.BuildStatus)
-                {
-                    return x.BuildStatus.CompareTo(y.BuildStatus) * (ascending ? 1 : -1);
-                }
-                else if (column == ProjectGridSortColumn.ServerName)
-                {
-                    return x.ServerName.CompareTo(y.ServerName) * (ascending ? 1 : -1);
-                }
-                else if (column == ProjectGridSortColumn.Category)
-                {
-                    return x.Category.CompareTo(y.Category) * (ascending ? 1 : -1);
-                }
-                else
-                {
-                    return 0;
-                }
-            }
-        }
-
-        private string readRunningTimeIfFileEmpty(IFarmService farmService, DefaultProjectSpecifier projectSpecifier, IServerSpecifier serverSpecifier, string dir)
-        {
-            IBuildSpecifier[] mostRecentBuildSpecifiers = farmService.GetMostRecentBuildSpecifiers(projectSpecifier, 1, BuildReportBuildPlugin.ACTION_NAME);
-            var buildFile = String.Format(@"{0}{1}\ccnet\{2}\Artifacts\buildlogs\{3}", dir, serverSpecifier.ServerName, projectSpecifier.ProjectName, mostRecentBuildSpecifiers[0].BuildName);
-            var doc = XDocument.Load(buildFile);
-            IEnumerable<XElement> elemList = doc.Descendants("build");
-            if (Directory.Exists(buildFile))
-            {
-                foreach (var node in elemList)
-                {
-                    return (string)node.Attribute("buildtime");
-                }
-            }
-            return String.Empty;
-        }
-
-        private List<DataGridRow> getLastFiveDataGridRows(IServerSpecifier serverSpecifier, DefaultProjectSpecifier projectSpecifier, string dir, 
-            IFarmService farmService, ProjectStatus status)
-        {
-            var lastFiveDataList = new List<DataGridRow>();
-            int cont = 0;
-            if (Directory.Exists(String.Format(@"{0}{1}\ccnet\{2}\Artifacts\buildlogs", dir, serverSpecifier.ServerName, projectSpecifier.ProjectName)))
-            {
-                IBuildSpecifier[] mostRecentBuildSpecifiers = farmService.GetMostRecentBuildSpecifiers(projectSpecifier, 5, BuildReportBuildPlugin.ACTION_NAME);
-                if (Directory.Exists(dir))
-                {
-                    foreach (IBuildSpecifier buildSpecifier in mostRecentBuildSpecifiers)
-                    {
-                        lastFiveDataList.Add(getBuildData(serverSpecifier, projectSpecifier, dir, status, buildSpecifier, cont));
-                        cont = 1;
-                    }
-                }
-                return lastFiveDataList;
-            }
-            lastFiveDataList.Add(new DataGridRow("Unknown", string.Empty, string.Empty));
-            return lastFiveDataList;
-        }
-
-        private DataGridRow getBuildData(IServerSpecifier serverSpecifier, DefaultProjectSpecifier projectSpecifier, string dir, ProjectStatus status, IBuildSpecifier buildSpecifier, int cont)
-        {
-            DataGridRow dataToReturn;
-            string buildName = buildSpecifier.BuildName;
-            string lastStatus = "";
-            if (cont == 0)
-            {
-                lastStatus = status.BuildStatus.ToString();
+                command = (CommandType)Enum.Parse(typeof(CommandType), extra[0], true);
             }
             else
             {
-                if (buildName.Contains("Lbuild")) { lastStatus = "Success"; }
-                else { lastStatus = "Failure"; }
+                DisplayHelp(opts);
+                return;
             }
-            string lastDate = String.Format("{0}-{1}-{2} {3}:{4}:{5}", buildName.Substring(3, 4), buildName.Substring(7, 2), buildName.Substring(9, 2),
-                                                                        buildName.Substring(11, 2), buildName.Substring(13, 2), buildName.Substring(15, 2));
-            string lastLink = String.Format("http://{0}/ccnet/server/{0}/project/{1}/build/{2}/ViewBuildReport.aspx", 
-                                                    serverSpecifier.ServerName, projectSpecifier.ProjectName, buildName);
-            dataToReturn = new DataGridRow(lastStatus, lastDate, lastLink);
-            return dataToReturn;
-        }
 
-        private int getQueuePosition(ProjectStatus status, IServerSpecifier serverSpecifier, DefaultProjectSpecifier projectSpecifier, IFarmService farmService)
-        {
-            if(status.Activity.ToString().Equals("Pending"))
+            try
             {
-                return getPositionInQueueList(status, serverSpecifier, projectSpecifier, farmService);  
-            }
-            return -1; 
-        }
-
-        private int getPositionInQueueList(ProjectStatus status, IServerSpecifier serverSpecifier, DefaultProjectSpecifier projectSpecifier, IFarmService farmService)
-        {
-            CruiseServerSnapshotListAndExceptions snapshot = farmService.GetCruiseServerSnapshotListAndExceptions(serverSpecifier, string.Empty);
-            List<QueueSnapshot> queues = new List<QueueSnapshot>();
-
-            foreach (CruiseServerSnapshot cruiseServerSnapshot in snapshot.Snapshots)
-            {
-                QueueSetSnapshot queueSnapshot = cruiseServerSnapshot.QueueSetSnapshot;
-                foreach (QueueSnapshot queueSnapshotItem in queueSnapshot.Queues) {
-                    var index = checkPositionQueue(queueSnapshotItem, projectSpecifier);
-                    if (index > -1) { return index; }
+                switch (command)
+                {
+                    case CommandType.Help:
+                        DisplayHelp(opts);
+                        break;
+                    case CommandType.Retrieve:
+                        RunRetrive();
+                        break;
+                    case CommandType.ForceBuild:
+                        RunForceBuild();
+                        break;
+                    case CommandType.CancelPending:
+                        RunCancelPending();
+                        break;
+                    case CommandType.AbortBuild:
+                        RunAbortBuild();
+                        break;
+                    case CommandType.StartProject:
+                        RunStartProject();
+                        break;
+                    case CommandType.StopProject:
+                        RunStopProject();
+                        break;
+                    case CommandType.Volunteer:
+                        RunVolunteer();
+                        break;
+                    case CommandType.CancelVolunteer:
+                        RunCancelVolunteer();
+                        break;
+                    default:
+                        throw new CruiseControlException("Unknown action: " + command.ToString());
                 }
             }
-            return -1;
-        }
-
-        private int checkPositionQueue(QueueSnapshot queueSnapshotItem, DefaultProjectSpecifier projectSpecifier)
-        {
-            for (int i = 0; i<queueSnapshotItem.Requests.Count; i++)
+            catch (Exception error)
             {
-                if (queueSnapshotItem.Requests[i].ProjectName == projectSpecifier.ProjectName)
-                {
-                    return i;
-                }
+                WriteError("ERROR: An unknown error has occurred!", error);
             }
-            return -1;
         }
 
-        private int brokenTime(IServerSpecifier serverSpecifier, DefaultProjectSpecifier projectSpecifier, string dir, IFarmService farmService, ProjectStatus status)
+        private static CruiseServerClientBase GenerateClient()
         {
-            DataGridRow helper;
-            DateTime dateFailure = DateTime.Now;
-            DateTime today = DateTime.Now;
-            int cont = 0;
-            string dirPath = String.Format(@"{0}{1}\ccnet\{2}\Artifacts\buildlogs", dir, serverSpecifier.ServerName, projectSpecifier.ProjectName);
-            if (Directory.Exists(dirPath))
+            var client = new CruiseServerClientFactory().GenerateClient(server, target);
+            if (!string.IsNullOrEmpty(userName))
             {
-                IBuildSpecifier[] mostRecentBuildSpecifiers = farmService.GetMostRecentBuildSpecifiers(projectSpecifier, Directory.GetFiles(dirPath).Length, BuildReportBuildPlugin.ACTION_NAME);
-                foreach (IBuildSpecifier buildSpecifier in mostRecentBuildSpecifiers)
+                client.Login(new { UserName = userName, Password = password });
+            }
+
+            return client;
+        }
+
+        private static void RunForceBuild()
+        {
+            if (ValidateParameter(server, "--server") &&
+                ValidateNotAll() &&
+                ValidateParameter(project, "--project"))
+            {
+                try
                 {
-                    helper = getBuildData(serverSpecifier, projectSpecifier, dir, status, buildSpecifier, cont);
-                    if (helper.BuildStatus.Equals("Failure"))
+                    Dictionary<string, string> userParameters = new Dictionary<string, string>();
+                    if (File.Exists(params_filename))
                     {
-                        dateFailure = DateTime.ParseExact(helper.Date, "yyyy-MM-dd HH:mm:ss", System.Globalization.CultureInfo.InvariantCulture);
+                        XmlDocument xmlDoc = new XmlDocument();
+                        xmlDoc.Load(params_filename);
+                        XmlNodeList names = xmlDoc.GetElementsByTagName("name");
+                        XmlNodeList values = xmlDoc.GetElementsByTagName("value");
+
+                        for (int i = 0; i < names.Count; ++i)
+                            userParameters.Add(names[i].InnerText, values[i].InnerText);
                     }
-                    else if (helper.BuildStatus.Equals("Success"))
+                    else if (!String.IsNullOrEmpty(string_params))
                     {
+                        string[] splittedParams = string_params.Split(';');
+                        foreach (string nameValuePair in splittedParams)
+                        {
+                            string[] splittedNameValuePair = nameValuePair.Split('=');
+                            userParameters.Add(splittedNameValuePair[0], splittedNameValuePair[1]);
+                        }
+                    }
+
+
+                    using (var client = GenerateClient())
+                    {
+                        List<ParameterBase> parameters = client.ListBuildParameters(project);
+                        List<NameValuePair> buildParameters = new List<NameValuePair>();
+
+                        foreach (ParameterBase parameter in parameters)
+                        {
+                            if (!quiet) WriteLine(string.Format(System.Globalization.CultureInfo.CurrentCulture, "Parameter: {0}", parameter.Name), ConsoleColor.Gray);
+
+                            bool required = false;
+                            PropertyInfo propInfos = parameter.GetType().GetProperty("IsRequired");
+                            if (propInfos == null)
+                                WriteLine(string.Format(System.Globalization.CultureInfo.CurrentCulture, "propInfos is null, considering that parameter {0} is not required", parameter.Name), ConsoleColor.DarkYellow);
+                            else
+                                required = (bool)propInfos.GetValue(parameter, null);
+
+                            if (!quiet) WriteLine(string.Format(System.Globalization.CultureInfo.CurrentCulture, " Kind: {0}", parameter.ToString()), ConsoleColor.Gray);
+                            if (!quiet) WriteLine(string.Format(System.Globalization.CultureInfo.CurrentCulture, " Data type: {0}", parameter.DataType), ConsoleColor.Gray);
+                            if (!quiet) WriteLine(string.Format(System.Globalization.CultureInfo.CurrentCulture, " Required: {0}", required), ConsoleColor.Gray);
+                            string userProvidedValue;
+                            userParameters.TryGetValue(parameter.Name, out userProvidedValue);
+                            if (!quiet) WriteLine(string.Format(System.Globalization.CultureInfo.CurrentCulture, " User provided value: {0}", userProvidedValue), ConsoleColor.Gray);
+
+                            var convertedValue = parameter.Convert(userProvidedValue);
+                            string convertedValueString = userProvidedValue;
+                            if (convertedValue != null)
+                            {
+                                convertedValueString = convertedValue.ToString();
+                            }
+                            if (!quiet) WriteLine(string.Format(System.Globalization.CultureInfo.CurrentCulture, " Converted value: {0}", convertedValueString), ConsoleColor.Gray);
+
+                            if (!quiet) WriteLine(string.Format(System.Globalization.CultureInfo.CurrentCulture, " Default value: {0}", parameter.DefaultValue), ConsoleColor.Gray);
+                            if (parameter.AllowedValues == null)
+                            {
+                                if (!quiet) WriteLine(" Allowed values: null", ConsoleColor.Gray);
+                            }
+                            else
+                            {
+                                if (!quiet) WriteLine(string.Format(System.Globalization.CultureInfo.CurrentCulture, " Allowed values: {0}", parameter.AllowedValues), ConsoleColor.Gray);
+
+                                bool isAllowedValue = false;
+                                int i = 0;
+                                while (!isAllowedValue && (i < parameter.AllowedValues.Length))
+                                {
+                                    isAllowedValue = parameter.AllowedValues[i].Equals(userProvidedValue);
+                                    ++i;
+                                }
+
+                                if (!isAllowedValue)
+                                    throw new CruiseControlException(string.Format(System.Globalization.CultureInfo.CurrentCulture, "Parameter {0} was given value {1} which is not one of the allowed ones ({2})", parameter.Name, userProvidedValue, string.Format(System.Globalization.CultureInfo.CurrentCulture, "{0}", parameter.AllowedValues)));
+                            }
+
+                            if (required && String.IsNullOrEmpty(convertedValueString) && String.IsNullOrEmpty(parameter.DefaultValue))
+                                throw new CruiseControlException(string.Format(System.Globalization.CultureInfo.CurrentCulture, "Parameter {0} is required but was not provided and does not have a default value", parameter.Name));
+
+                            buildParameters.Add(new NameValuePair(parameter.Name, convertedValueString));
+                        }
+
+                        if (!quiet) WriteLine(string.Format(System.Globalization.CultureInfo.CurrentCulture, "Sending ForceBuild request for '{0}'", project), ConsoleColor.White);
+                        client.ForceBuild(project, buildParameters, condition);
+                        if (!quiet) WriteLine("ForceBuild request sent", ConsoleColor.White);
+                    }
+                }
+                catch (Exception error)
+                {
+                    WriteError("ERROR: Unable to send ForceBuild request", error);
+                }
+            }
+        }
+
+        private static void RunCancelPending()
+        {
+            if (ValidateParameter(server, "--server") &&
+                ValidateNotAll() &&
+                ValidateParameter(project, "--project"))
+            {
+                try
+                {
+                    using (var client = GenerateClient())
+                    {
+                        if (!quiet) WriteLine(string.Format(System.Globalization.CultureInfo.CurrentCulture, "Sending CancelPending request for '{0}'", project),
+                                                                                                                                            ConsoleColor.White);
+                        client.CancelPendingRequest(project);
+                        if (!quiet) WriteLine("CancelPending request sent", ConsoleColor.White);
+                    }
+                }
+                catch (Exception error)
+                {
+                    WriteError("ERROR: Unable to send CancelPending request", error);
+                }
+            }
+        }
+
+        private static void RunAbortBuild()
+        {
+            if (ValidateParameter(server, "--server") &&
+                ValidateNotAll() &&
+                ValidateParameter(project, "--project"))
+            {
+                try
+                {
+                    using (var client = GenerateClient())
+                    {
+                        if (!quiet) WriteLine(string.Format(System.Globalization.CultureInfo.CurrentCulture, "Sending AbortBuild request for '{0}'", project), ConsoleColor.White);
+                        client.AbortBuild(project);
+                        if (!quiet) WriteLine("AbortBuild request sent", ConsoleColor.White);
+                    }
+                }
+                catch (Exception error)
+                {
+                    WriteError("ERROR: Unable to send ForceBuild request", error);
+                }
+            }
+        }
+
+        private static void RunStartProject()
+        {
+            if (ValidateParameter(server, "--server") &&
+                ValidateNotAll() &&
+                ValidateParameter(project, "--project"))
+            {
+                try
+                {
+                    using (var client = GenerateClient())
+                    {
+                        if (!quiet) WriteLine(string.Format(System.Globalization.CultureInfo.CurrentCulture, "Sending StartProject request for '{0}'", project), ConsoleColor.White);
+                        client.StartProject(project);
+                        if (!quiet) WriteLine("StartProject request sent", ConsoleColor.White);
+                    }
+                }
+                catch (Exception error)
+                {
+                    WriteError("ERROR: Unable to send ForceBuild request", error);
+                }
+            }
+        }
+
+        private static void RunStopProject()
+        {
+            if (ValidateParameter(server, "--server") &&
+                ValidateNotAll() &&
+                ValidateParameter(project, "--project"))
+            {
+                try
+                {
+                    using (var client = GenerateClient())
+                    {
+                        if (!quiet) WriteLine(string.Format(System.Globalization.CultureInfo.CurrentCulture, "Sending StopProject request for '{0}'", project), ConsoleColor.White);
+                        client.StopProject(project);
+                        if (!quiet) WriteLine("StopProject request sent", ConsoleColor.White);
+                    }
+                }
+                catch (Exception error)
+                {
+                    WriteError("ERROR: Unable to send ForceBuild request", error);
+                }
+            }
+        }
+
+        private static void RunVolunteer()
+        {
+            if (ValidateParameter(server, "--server") &&
+                ValidateNotAll() &&
+                ValidateParameter(project, "--project"))
+            {
+                try
+                {
+                    using (var client = GenerateClient())
+                    {
+                        if (!quiet) WriteLine(string.Format(System.Globalization.CultureInfo.CurrentCulture, "Volunteering to fix '{0}'", project), ConsoleColor.White);
+                        string message = string.Format(System.Globalization.CultureInfo.CurrentCulture, "{0} is fixing the build.", volunteer_name);
+                        client.SendMessage(project, new Message(message, Message.MessageKind.Fixer));
+                        if (!quiet) WriteLine("Volunteer message sent", ConsoleColor.White);
+                    }
+                }
+                catch (Exception error)
+                {
+                    WriteError("ERROR: Unable to volunteer", error);
+                }
+            }
+        }
+
+        private static void RunCancelVolunteer()
+        {
+            if (ValidateParameter(server, "--server") &&
+                ValidateNotAll() &&
+                ValidateParameter(project, "--project"))
+            {
+                try
+                {
+                    using (var client = GenerateClient())
+                    {
+                        if (!quiet) WriteLine(string.Format(System.Globalization.CultureInfo.CurrentCulture, "Removing the fixer in '{0}'", project), 
+                                                                                                                                ConsoleColor.White);
+                        client.SendMessage(project, new Message(string.Empty, Message.MessageKind.Fixer));
+                        if (!quiet) WriteLine("CancelVolunteer message sent", ConsoleColor.White);
+                    }
+                }
+                catch (Exception error)
+                {
+                    WriteError("ERROR: Unable to volunteer", error);
+                }
+            }
+        }
+
+        private static void RunRetrive()
+        {
+            if (ValidateParameter(server, "--server"))
+            {
+                if (string.IsNullOrEmpty(project) && !all)
+                {
+                    WriteLine("Must specify either a project or use the '-all' option", ConsoleColor.Red);
+                }
+                else
+                {
+                    using (var client = GenerateClient())
+                    {
+                        if (all)
+                        {
+                            DisplayServerStatus(client, quiet);
+                        }
+                        else
+                        {
+                            DisplayProjectStatus(client, project, quiet);
+                        }
+                    }
+                }
+            }
+        }
+
+        private static void DisplayServerStatus(CruiseServerClientBase client, bool isQuiet)
+        {
+            try
+            {
+                if (!isQuiet) WriteLine("Retrieving snapshot from " + client.TargetServer, ConsoleColor.Gray);
+                CruiseServerSnapshot snapShot = client.GetCruiseServerSnapshot();
+                if (xml)
+                {
+                    XmlSerializer serializer = new XmlSerializer(typeof(CruiseServerSnapshot));
+                    Stream console = Console.OpenStandardOutput();
+                    serializer.Serialize(console, snapShot);
+                    console.Close();
+                }
+                else
+                {
+                    foreach (ProjectStatus prj in snapShot.ProjectStatuses)
+                    {
+                        DisplayProject(prj);
+                    }
+                }
+            }
+            catch (Exception error)
+            {
+                WriteError("ERROR: Unable to retrieve server details", error);
+            }
+        }
+
+        private static void DisplayProjectStatus(CruiseServerClientBase client, string projectName, bool isQuiet)
+        {
+            try
+            {
+                if (!isQuiet) WriteLine(string.Format(System.Globalization.CultureInfo.CurrentCulture, "Retrieving project '{0}' on server {1}", projectName, client.TargetServer), ConsoleColor.Gray);
+                CruiseServerSnapshot snapShot = client.GetCruiseServerSnapshot();
+                var wasFound = false;
+                foreach (ProjectStatus project in snapShot.ProjectStatuses)
+                {
+                    if (string.Equals(project.Name, projectName, StringComparison.CurrentCultureIgnoreCase))
+                    {
+                        if (xml)
+                        {
+                            XmlSerializer serializer = new XmlSerializer(typeof(ProjectStatus));
+                            Stream console = Console.OpenStandardOutput();
+                            serializer.Serialize(console, project);
+                            console.Close();
+                        }
+                        else
+                        {
+                            DisplayProject(project);
+                        }
+
+                        wasFound = true;
                         break;
                     }
-                    cont = 1;
+                }
+
+                if (!wasFound)
+                {
+                    WriteError("Project '" + projectName + "' was not found", null);
                 }
             }
-            return Convert.ToInt32((today - dateFailure).TotalDays);
+            catch (Exception error)
+            {
+                WriteError("ERROR: Unable to retrieve project details", error);
+            }
+        }
+
+        private static void DisplayProject(ProjectStatus project)
+        {
+            WriteLine(string.Format(System.Globalization.CultureInfo.CurrentCulture, "{0}: {1}", project.Name, project.Status), ConsoleColor.White);
+            WriteLine(string.Format(System.Globalization.CultureInfo.CurrentCulture, "\tActivity: {0}", project.Activity), ConsoleColor.White);
+            WriteLine(string.Format(System.Globalization.CultureInfo.CurrentCulture, "\tBuild Status: {0}", project.BuildStatus), ConsoleColor.White);
+            if (!string.IsNullOrEmpty(project.BuildStage))
+            {
+                XmlDocument stageXml = new XmlDocument();
+                try
+                {
+                    stageXml.LoadXml(project.BuildStage);
+                    foreach (XmlElement stageItem in stageXml.SelectNodes("/data/Item"))
+                    {
+                        string stageTime = stageItem.GetAttribute("Time");
+                        string stageData = stageItem.GetAttribute("Data");
+                        WriteLine(string.Format(System.Globalization.CultureInfo.CurrentCulture, "\tBuild Stage: {0} ({1})", stageData, stageTime), ConsoleColor.White);
+                    }
+                }
+                catch
+                {
+                    WriteLine(string.Format(System.Globalization.CultureInfo.CurrentCulture, "\tBuild Stage: {0}", project.BuildStage), ConsoleColor.White);
+                }
+            }
+            WriteLine(string.Format(System.Globalization.CultureInfo.CurrentCulture, "\tLast Build: {0:G}", project.LastBuildDate), ConsoleColor.White);
+            WriteLine(string.Format(System.Globalization.CultureInfo.CurrentCulture, "\tNext Build: {0:G}", project.NextBuildTime), ConsoleColor.White);
+        }
+
+        private static bool ValidateParameter(string value, string name)
+        {
+            if (string.IsNullOrEmpty(value))
+            {
+                WriteError(string.Format(System.Globalization.CultureInfo.CurrentCulture, "Input parameter '{0}' is missing", name), null);
+                return false;
+            }
+            return true;
+        }
+
+        private static bool ValidateNotAll()
+        {
+            if (all)
+            {
+                WriteError(string.Format(System.Globalization.CultureInfo.CurrentCulture, "Input parameter '--all' is not valid for {0}", command), null);
+                return false;
+            }
+            return true;
+        }
+
+        private static void WriteLine(string line, ConsoleColor colour)
+        {
+            ConsoleColor currentColor = Console.ForegroundColor;
+            Console.ForegroundColor = colour;
+            Console.WriteLine(line);
+            Console.ForegroundColor = currentColor;
+        }
+
+        private static void WriteError(string message, Exception error)
+        {
+            WriteLine(message, ConsoleColor.Red);
+            if (error != null)
+            {
+                WriteLine(error.ToString(), ConsoleColor.Red);
+                Environment.ExitCode = 2;
+            }
+            else
+            {
+                Environment.ExitCode = 1;
+            }
+        }
+
+        private static void DisplayHelp(OptionSet opts)
+        {
+            string xmlParamFileLayout =
+@"<parameters>
+  <parameter>
+    <name>buildType</name>
+    <value>Development</value>
+  </parameter>
+  <parameter>
+    <name>DeployMsg</name>
+    <value>This is a test</value>
+  </parameter>
+</parameters> ";
+
+            Assembly thisApp = Assembly.GetExecutingAssembly();
+            Stream helpStream = thisApp.GetManifestResourceStream("ThoughtWorks.CruiseControl.CCCmd.Help.txt");
+            try
+            {
+                StreamReader reader = new StreamReader(helpStream);
+                string data = reader.ReadToEnd();
+                Console.Write(data);
+            }
+            finally
+            {
+                helpStream.Close();
+            }
+            opts.WriteOptionDescriptions(Console.Out);
+
+            Console.WriteLine();
+            WriteLine("Layout of the parameter file :", ConsoleColor.Yellow);
+            WriteLine(xmlParamFileLayout, ConsoleColor.DarkGray);
+            Console.WriteLine();
+            WriteLine(" Examples :", ConsoleColor.Yellow);
+            WriteLine("-==========-", ConsoleColor.Yellow);
+            WriteLine("    CCCmd.exe retrieve   -s=tcp://localhost:21234/CruiseManager.rem -a", ConsoleColor.White);
+            WriteLine("    CCCmd.exe retrieve   -s=tcp://localhost:21234/CruiseManager.rem -a -x", ConsoleColor.White);
+            WriteLine("    CCCmd.exe retrieve   -s=tcp://localhost:21234/CruiseManager.rem -p=ccnet", ConsoleColor.White);
+            WriteLine("    CCCmd.exe forcebuild -s=tcp://localhost:21234/CruiseManager.rem -p=ccnet", ConsoleColor.White);
+            WriteLine("    CCCmd.exe forcebuild -s=tcp://localhost:21234/CruiseManager.rem -p=ccnet -r=buildtype=fulltest", ConsoleColor.White);
+            WriteLine("    CCCmd.exe forcebuild -s=tcp://localhost:21234/CruiseManager.rem -p=ccnet -r=buildtype=fulltest;makepackage=true", ConsoleColor.White);
+
+
+
+
         }
     }
 }
